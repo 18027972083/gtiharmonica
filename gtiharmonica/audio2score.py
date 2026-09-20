@@ -398,36 +398,27 @@ def infer_key(notes: Sequence[Note]) -> Tuple[int, str]:
     return best[1], best[2]
 
 
-def grid_quantize(notes: Sequence[Note], bpm: float = 120.0, div: int = 4
+def grid_quantize(notes: Sequence[Note], grid_sec: float = 0.12
                   ) -> List[Note]:
-    """把音符吸附到节拍网格：起点取整、时值取整数个格。
+    """把音符时值规整到网格（**不动起点**）。
 
-    为什么必须有这一步：音频转谱的时值是模型估出来的散值（实测中位
-    300ms，还不是任何网格的倍数），弹起来节奏是散的。人工扒的谱之所以
-    好弹，正是因为它按网格对齐 —— 实测那份被认可的《心似烟火》就是
-    「主旋律轨 → 单音化 → 120BPM 的 16 分网格（125ms）」的产物。
+    为什么只规整时值：实测那份被认可的人工整理曲谱，时值全落在网格上，
+    但起点只有 3% 在网格 —— 它保留原始节奏。之前这里把起点也吸附到网格，
+    原本错落的音符被压成等间距，听感直接掉两成（用户报的「音不准」其实
+    是律动被压平）。所以：长度规整、起点保持原样。
     """
-    grid = 60.0 / max(bpm, 1e-6) / max(div, 1)
-    cells: dict = {}
-    order: List = []
+    out: List[Note] = []
     for n in sorted(notes, key=lambda x: x.start):
-        g = int(round(n.start / grid))
-        key = (g, n.pitch)
-        dur = max(1, int(round(n.duration / grid)))
-        if key in cells:
-            cells[key] = max(cells[key], dur)      # 同一格同一个音，并成一个
-        else:
-            cells[key] = dur
-            order.append(key)
-    return [Note(pitch=p, start=g * grid, duration=cells[(g, p)] * grid)
-            for g, p in order]
+        dur = max(1, int(n.duration / grid_sec)) * grid_sec   # 向下取整
+        out.append(Note(pitch=n.pitch, start=n.start, duration=dur,
+                        velocity=n.velocity))
+    return out
 
 
 def polish_score(score: Score, target_median: int = TARGET_MEDIAN,
                  octave: bool = True, merge_fragments: bool = True,
                  drop_tiny: float = 0.06, snap_scale: bool = True,
-                 quantize: bool = True, bpm: float = 120.0,
-                 grid_div: int = 4) -> Score:
+                 quantize: bool = True, grid_sec: float = 0.12) -> Score:
     """把转谱原样结果整理成「好弹」的曲谱。
 
     音频转谱与人工扒谱的主要差距都在这几步里：
@@ -491,7 +482,7 @@ def polish_score(score: Score, target_median: int = TARGET_MEDIAN,
 
     # 5) 节拍网格量化（最后做：前面的合并已经把碎片收干净了）
     if quantize and notes:
-        notes = grid_quantize(notes, bpm=bpm, div=grid_div)
+        notes = grid_quantize(notes, grid_sec=grid_sec)
 
     out = Score(title=score.title, notes=notes, bpm=score.bpm,
                 warnings=list(score.warnings))
