@@ -141,6 +141,23 @@ dialog_case('公告·添加曲谱（AnnouncementDialog）',
 dialog_case('卡密激活（ActivationDialog）',
             lambda: ActivationDialog(win))
 dialog_case('关于（AboutDialog）', lambda: AboutDialog(win))
+
+
+def shortcut_case():
+    """快捷方式：powershell 路径必须真实存在。
+
+    打包版踩过的坑：路径少了 System32\\WindowsPowerShell\\v1.0 一层，
+    退回裸名后 PATH 不完整就报「创建失败」。
+    """
+    from gtiharmonica import shortcut as _sc
+    ps = _sc._powershell_exe()
+    assert os.path.exists(ps), 'powershell 路径不存在: %s' % ps
+    # 编码对比测试留下的旧文件不该出现在预期路径之外，这里只校验路径解析
+    paths = _sc.expected_paths()
+    assert len(paths) == 2 and all(p.endswith('.lnk') for p in paths), paths
+
+
+case('快捷方式路径解析（shortcut）')(shortcut_case)
 if score_now is not None:
     dialog_case('策略分析（AnalysisDialog）',
                 lambda: AnalysisDialog(score_now, instrument, options,
