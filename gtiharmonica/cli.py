@@ -352,7 +352,7 @@ def cmd_windows(args) -> int:
 
 
 def cmd_import_legacy(args) -> int:
-    """批量导入旧版 GTIartist 曲库。
+    """批量导入旧版曲库。
 
     会把曲谱规范化为本工具格式，并**保留 phrase_end 换气标记**，
     同时报告每首曲子在本乐器音域内的可演奏覆盖率。
@@ -531,7 +531,7 @@ def build_parser() -> argparse.ArgumentParser:
     p.set_defaults(func=cmd_windows)
 
     p = sub.add_parser('import-legacy',
-                       help='批量导入旧版 GTIartist 曲库')
+                       help='批量导入旧版曲库')
     p.add_argument('source', help='旧版 songs 目录')
     p.add_argument('--to', help='目标曲库目录（默认本程序的曲库）')
     add_common(p); add_tuning(p)
