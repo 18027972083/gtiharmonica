@@ -617,6 +617,8 @@ HELP_HTML = """
 
 <h3>第一次使用</h3>
 <ol>
+<li>首次打开需要<b>输入卡密激活</b>：在激活窗口里填入卡密即可，
+    激活一次以后这台机器直接就能用（验证在本机完成，不联网、不上传信息）。</li>
 <li>打开游戏，取出口琴并进入可演奏界面。建议把游戏设为<b>无边框窗口</b>模式。</li>
 <li>确认游戏内的按键设置与本程序一致（默认：音阶键 Z X C V B N M <code>,</code>；
     鼠标左键=降八度，中键=升半音，右键=升八度）。</li>
@@ -927,6 +929,70 @@ class AnnouncementDialog(QDialog):
 
     def _open_help(self) -> None:
         HelpDialog(self).exec()
+
+
+class ActivationDialog(QDialog):
+    """卡密激活：输入卡密 → 校验 → 写入本机凭证。
+
+    用在启动流程里（主窗口之前）：exec() 返回 Accepted 表示已激活。
+    """
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle('卡密激活')
+        self.setMinimumWidth(470)
+        root = QVBoxLayout(self)
+        root.setSpacing(12)
+
+        title = QLabel('<h2>卡密激活</h2>')
+        root.addWidget(title)
+
+        info = QLabel(
+            '本工具需要卡密激活后在本机使用。<br>'
+            '激活一次即可，以后打开这台机器直接就能用 ——'
+            '验证完全在本机完成，不联网、不上传任何信息。')
+        info.setObjectName('muted')
+        info.setWordWrap(True)
+        root.addWidget(info)
+
+        self.edit = QLineEdit()
+        self.edit.setPlaceholderText('请输入卡密')
+        self.edit.returnPressed.connect(self._try_activate)
+        root.addWidget(self.edit)
+
+        self.hint = QLabel('')
+        self.hint.setObjectName('muted')
+        self.hint.setWordWrap(True)
+        root.addWidget(self.hint)
+
+        buttons = QDialogButtonBox()
+        ok = buttons.addButton('激活', QDialogButtonBox.AcceptRole)
+        quit_btn = buttons.addButton('退出', QDialogButtonBox.RejectRole)
+        ok.clicked.connect(self._try_activate)
+        quit_btn.clicked.connect(self.reject)
+        root.addWidget(buttons)
+
+        from ..activation import machine_id
+        mid = QLabel('本机机器码：%s（激活遇到问题时报给作者核对）'
+                     % machine_id())
+        mid.setObjectName('muted')
+        mid.setWordWrap(True)
+        root.addWidget(mid)
+
+    def _try_activate(self) -> None:
+        from ..activation import activate
+
+        text = self.edit.text()
+        if not text.strip():
+            self.hint.setText('请输入卡密。')
+            return
+        if activate(text):
+            self.hint.setText('激活成功，正在启动…')
+            self.accept()
+            return
+        self.hint.setText('卡密不正确，请检查后重试。')
+        self.edit.selectAll()
+        self.edit.setFocus()
 
 
 class AboutDialog(QDialog):

@@ -251,6 +251,14 @@ def bootstrap(argv: Optional[list] = None) -> int:
     apply_theme(app, _settings.value('theme_mode', 'light'))
     app.setWindowIcon(make_icon(64))
 
+    # 卡密激活：本机未激活时先弹激活窗（模态），取消就退出。
+    # 已激活的机器不走这里，打开即用。
+    from .activation import is_activated
+    if not is_activated():
+        from .gui.dialogs import ActivationDialog
+        if not ActivationDialog().exec():
+            return 0
+
     cfg_path = config_path()
     library = resolve_library_dir()
 
@@ -292,6 +300,13 @@ _CLI_COMMANDS = frozenset({
 def main() -> int:
     argv = sys.argv[1:]
     if argv and argv[0] in _CLI_COMMANDS:
+        # 命令行同样要激活：未激活时没有图形界面弹窗，直接给文字提示。
+        from .activation import is_activated
+        if not is_activated():
+            sys.stderr.write(
+                '本机尚未激活。请先打开图形界面（双击程序），'
+                '在激活窗口输入卡密后再使用命令行。\n')
+            return 4
         from .cli import main as cli_main
         return cli_main()
     return bootstrap()

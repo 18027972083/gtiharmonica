@@ -20,6 +20,9 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+# 卡密激活只拦“启动流程”，本套件直接构建主窗口不受影响；
+# 这里再兜一层，保证任何新加的启动路径都不会在无人值守时卡在激活窗。
+os.environ.setdefault('GTIHARMONICA_SKIP_ACTIVATION', '1')
 
 from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication
@@ -108,7 +111,8 @@ if not bad_scores:
 # ------------------------------------------------------------------
 # 3. 全部对话框：真实参数构建 + 渲染
 # ------------------------------------------------------------------
-from gtiharmonica.gui.dialogs import (AboutDialog, AnalysisDialog,
+from gtiharmonica.gui.dialogs import (AboutDialog, ActivationDialog,
+                                      AnalysisDialog,
                                       AnnouncementDialog, CalibrateDialog,
                                       HelpDialog,
                                       ImportModeDialog, KeymapDialog,
@@ -134,6 +138,8 @@ dialog_case('设置（SettingsDialog）',
 dialog_case('使用说明（HelpDialog）', lambda: HelpDialog(win))
 dialog_case('公告·添加曲谱（AnnouncementDialog）',
             lambda: AnnouncementDialog(win))
+dialog_case('卡密激活（ActivationDialog）',
+            lambda: ActivationDialog(win))
 dialog_case('关于（AboutDialog）', lambda: AboutDialog(win))
 if score_now is not None:
     dialog_case('策略分析（AnalysisDialog）',
