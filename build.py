@@ -62,9 +62,18 @@ OTHER_EXCLUDES = [
     'xmlrpc', 'pdb', 'difflib', 'lib2to3',
     'pip', 'PIL', 'matplotlib', 'scipy', 'pandas',
     'test', 'idlelib', 'turtledemo', 'ensurepip', 'venv',
-    # 音频转谱功能已移除：numpy / soundfile / miniaudio 不再进入包体。
-    'numpy', 'numpy.testing', 'numpy.f2py', 'numpy.array_api',
-    'soundfile', 'miniaudio', 'cffi',
+    # 音频转曲谱（内置 GAME ONNX）要用来解码与算矩阵：
+    # numpy / soundfile / cffi 保留。miniaudio 不用。
+    'miniaudio',
+    # 这些是「本机装过但产品用不到」的大家伙：不排掉的话 PyInstaller 会把
+    # 它们整个拖进产物（实测 949MB → 排掉后回到 80MB 级）。
+    # torch / torchaudio / demucs 是命令行分离人声用的；librosa / numba /
+    # llvmlite / sklearn / cv2 / transformers / onnx 是它们的依赖或同生态包。
+    'torch', 'torchaudio', 'torchvision', 'demucs', 'librosa', 'numba',
+    'llvmlite', 'sklearn', 'cv2', 'transformers', 'onnx', 'onnx2torch',
+    'lightning', 'pytorch_lightning', 'torchmetrics', 'julius', 'dora',
+    'einops', 'openunmix', 'lameenc', 'samplerate', 'resampy', 'audioread',
+    'pooch', 'soxr', 'joblib', 'threadpoolctl',
     # 注意：distutils / setuptools **不能**排除。
     # Python 3.12+ 移除了标准库 distutils，PyInstaller 的 hook-distutils
     # 会把 setuptools._distutils 别名成 distutils；一旦这两个被排除，

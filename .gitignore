@@ -26,3 +26,6 @@ Desktop.ini
 
 # 发布产物（便携包）
 /release/
+
+# 内置推理模型（51MB 二进制，不进仓库；打包时由 build.py 带上）
+/gtiharmonica/assets/game_model/

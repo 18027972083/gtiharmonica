@@ -285,6 +285,7 @@ def bootstrap(argv: Optional[list] = None) -> int:
 _CLI_COMMANDS = frozenset({
     'play', 'preview', 'analyze', 'tracks', 'export',
     'import-legacy', 'selftest', 'calibrate', 'windows', 'init',
+    'transcribe',
 })
 
 

@@ -9,8 +9,9 @@ from PySide6.QtCore import QSettings, Qt, QTimer, Signal
 from PySide6.QtGui import QCloseEvent, QIcon
 from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QFileDialog,
                                QFrame, QHBoxLayout, QLabel, QMainWindow,
-                               QMenu, QMessageBox, QPushButton, QSizePolicy,
-                               QSlider, QStackedWidget, QStatusBar, QToolButton,
+                               QMenu, QMessageBox, QProgressDialog,
+                               QPushButton, QSizePolicy, QSlider,
+                               QStackedWidget, QStatusBar, QToolButton,
                                QVBoxLayout, QWidget)
 
 from .. import __version__
@@ -194,6 +195,16 @@ class MainWindow(QMainWindow):
         self.btn_jianpu.clicked.connect(
             lambda: self.open_jianpu_dialog())
         top.addWidget(self.btn_jianpu)
+
+        # 音频转曲谱：内置 GAME ONNX 模型，拖入歌文件也能触发
+        self.btn_audio = QPushButton('音频转曲谱')
+        self.btn_audio.setObjectName('ghost')
+        self.btn_audio.setToolTip(
+            '选一个音频文件（mp3 / wav / flac / ogg），\n'
+            '直接识别出人声/主旋律，转成曲谱加入曲库。\n'
+            '也可以把音频文件直接拖进窗口。')
+        self.btn_audio.clicked.connect(self._transcribe_from_dialog)
+        top.addWidget(self.btn_audio)
 
         self.btn_save_arrangement = QPushButton('保存编排曲谱')
         self.btn_save_arrangement.setToolTip(
@@ -735,7 +746,9 @@ class MainWindow(QMainWindow):
             event.acceptProposedAction()
 
     def dropEvent(self, event) -> None:
-        """拖入文件：曲谱（MIDI / JSON）入库，MIDI 二选一导入方式。"""
+        """拖入文件：曲谱（MIDI / JSON）入库；音频走内置转谱。"""
+        from ..audio2score import AUDIO_EXTS
+
         paths = [u.toLocalFile() for u in event.mimeData().urls()
                  if u.isLocalFile()]
         if not paths:
@@ -745,13 +758,20 @@ class MainWindow(QMainWindow):
         scores = [p for p in paths
                   if p.lower().endswith(('.mid', '.midi', '.json'))
                   and os.path.isfile(p)]
-        skipped = len(paths) - len(scores)
+        audios = [p for p in paths
+                  if p.lower().endswith(AUDIO_EXTS) and os.path.isfile(p)]
+        skipped = len(paths) - len(scores) - len(audios)
 
         if scores:
             self.import_paths(scores)
-        if not scores:
-            self._set_status('拖入的文件不是曲谱（支持 MIDI / JSON；'
-                             '键位谱文本请用「导入简谱」粘贴）')
+        if audios:
+            if len(audios) > 1:
+                self._set_status('一次转一个音频：先转 %s'
+                                 % os.path.basename(audios[0]))
+            self.transcribe_audio_file(audios[0])
+        if not scores and not audios:
+            self._set_status('拖入的文件不支持（曲谱：MIDI / JSON；'
+                             '音频：mp3 / wav / flac / ogg …）')
         elif skipped:
             self._set_status('已忽略 %d 个不支持的文件' % skipped)
 
@@ -763,6 +783,114 @@ class MainWindow(QMainWindow):
                                                 self.library_dir, patterns)
         if paths:
             self.import_paths(paths)
+
+    # -- 音频转曲谱（内置 GAME ONNX）--
+
+    def _transcribe_from_dialog(self) -> None:
+        """顶栏「音频转曲谱」：选一个音频文件。"""
+        from ..audio2score import AUDIO_EXTS
+        patterns = ('音频 (%s);;所有文件 (*)'
+                    % ' '.join('*' + e for e in AUDIO_EXTS))
+        path, _ = QFileDialog.getOpenFileName(self, '选择音频文件',
+                                              self.library_path(), patterns)
+        if path:
+            self.transcribe_audio_file(path)
+
+    def library_path(self) -> str:
+        """最近一次打开文件对话框的起始目录（曲库目录）。"""
+        return getattr(self, 'library_dir', '') or os.path.expanduser('~')
+
+    def _library_target(self, filename: str) -> str:
+        """曲库里的目标路径；重名时加 (1)(2)…，不覆盖已有曲目。"""
+        stem, ext = os.path.splitext(filename)
+        target = os.path.join(self.library_dir, filename)
+        n = 1
+        while os.path.exists(target):
+            target = os.path.join(self.library_dir,
+                                  '%s (%d)%s' % (stem, n, ext))
+            n += 1
+        return target
+
+    def transcribe_audio_file(self, path: str) -> None:
+        """音频 → 曲谱：确认 → 后台推理（带进度、可取消）→ 写入曲库。"""
+        from ..audio2score import model_available
+        from .worker import AudioTranscribeWorker
+
+        if not model_available():
+            QMessageBox.warning(
+                self, '无法转谱',
+                '内置的转谱模型不完整（gtiharmonica/assets/game_model）。\n'
+                '请使用完整解压的版本，或重新下载安装包。')
+            return
+
+        name = os.path.splitext(os.path.basename(path))[0]
+        ret = QMessageBox.question(
+            self, '音频转曲谱',
+            '要把「%s」转成曲谱吗？\n\n'
+            '· 本机 CPU 推理，一首 4 分钟的歌约 30 秒\n'
+            '· 跟着人声 / 主旋律唱的歌效果最好；伴奏很满的歌会混进一些\n'
+            '  杂音，先用「分离人声」处理一遍再转会干净很多\n\n'
+            '结果会作为新曲目加进曲库。' % name,
+            QMessageBox.Yes | QMessageBox.No, QMessageBox.Yes)
+        if ret != QMessageBox.Yes:
+            return
+
+        dlg = QProgressDialog('准备中…', '取消', 0, 100, self)
+        dlg.setWindowTitle('音频转曲谱')
+        dlg.setWindowModality(Qt.WindowModal)
+        dlg.setMinimumDuration(0)
+        dlg.setAutoClose(False)
+        dlg.setAutoReset(False)
+        dlg.setValue(0)
+
+        worker = AudioTranscribeWorker(path, title=name, parent=self)
+        self._transcribe_worker = worker       # 持有引用，别让线程被回收
+
+        def on_progress(stage: str, done: int, total: int) -> None:
+            if stage == '加载音频':
+                dlg.setLabelText('正在读取音频…')
+                dlg.setValue(3)
+            elif stage == '切片':
+                dlg.setLabelText('正在切分段落…')
+                dlg.setValue(6)
+            else:
+                dlg.setLabelText('正在识别音符…（第 %d/%d 段）'
+                                 % (min(done + 1, total), max(total, 1)))
+                dlg.setValue(8 + int(90 * done / max(total, 1)))
+
+        def on_done(score) -> None:
+            dlg.close()
+            from ..score import save_json_score
+            dest = self._library_target(name + '(音频转谱).json')
+            try:
+                save_json_score(score, dest)
+            except OSError as exc:
+                QMessageBox.warning(self, '写入曲库失败', str(exc))
+                return
+            self.library.refresh()
+            self.library.select_path(dest)
+            self.on_library_selected(dest)
+            self._set_status('音频转谱完成：%s（%d 个音符，时长 %s）'
+                             % (os.path.basename(dest), len(score.notes),
+                                self._fmt_dur(score.duration)))
+
+        def on_failed(msg: str) -> None:
+            dlg.close()
+            if msg.startswith('已取消'):
+                self._set_status('音频转谱已取消')
+                return
+            QMessageBox.warning(self, '转谱失败', msg)
+
+        worker.progress.connect(on_progress)
+        worker.done.connect(on_done)
+        worker.failed.connect(on_failed)
+        dlg.canceled.connect(worker.cancel)
+        worker.start()
+
+    @staticmethod
+    def _fmt_dur(seconds: float) -> str:
+        total = max(int(round(seconds)), 0)
+        return '%d:%02d' % (total // 60, total % 60)
 
     def import_paths(self, paths: list) -> None:
         """入库统一路由：JSON 直接复制；MIDI 先选「直转 / 旋律化」。

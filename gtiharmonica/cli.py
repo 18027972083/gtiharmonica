@@ -542,7 +542,81 @@ def build_parser() -> argparse.ArgumentParser:
     p.add_argument('--force', action='store_true')
     p.set_defaults(func=cmd_init)
 
+    p = sub.add_parser('transcribe',
+                       help='音频 → 曲谱（内置 GAME 模型；支持 mp3/wav/flac/ogg）')
+    p.add_argument('audio', help='音频文件，或装着一堆音频的目录（批量转）')
+    p.add_argument('-o', '--output', help='输出目录（默认写入本程序的曲库）')
+    p.add_argument('--title', help='曲名（默认取文件名；批量时忽略）')
+    p.set_defaults(func=cmd_transcribe)
+
     return ap
+
+
+def cmd_transcribe(args) -> int:
+    """音频 → 曲谱：内置 GAME ONNX 推理，输出本程序的 JSON 曲谱。"""
+    from .app import resolve_library_dir
+    from .audio2score import (AUDIO_EXTS, default_model_dir, model_available,
+                              transcribe_audio)
+    from .score import save_json_score
+
+    if not model_available():
+        print('内置转谱模型不完整：%s' % default_model_dir(), file=sys.stderr)
+        print('请使用完整解压的版本（模型在 gtiharmonica/assets/game_model）。')
+        return 1
+
+    src = args.audio
+    files: List[str] = []
+    if os.path.isdir(src):
+        files = [os.path.join(src, n) for n in sorted(os.listdir(src))
+                 if n.lower().endswith(AUDIO_EXTS)]
+    elif os.path.isfile(src):
+        files = [src]
+    if not files:
+        print('没找到音频文件：%s' % src, file=sys.stderr)
+        return 1
+
+    out_dir = args.output or resolve_library_dir()
+    os.makedirs(out_dir, exist_ok=True)
+    hr('音频转曲谱（内置 GAME ONNX 推理）')
+    print('  音频 %d 个   输出 %s' % (len(files), out_dir))
+
+    failed = 0
+    for path in files:
+        name = args.title if (args.title and len(files) == 1) else \
+            os.path.splitext(os.path.basename(path))[0]
+        print('  [%s]' % os.path.basename(path))
+        shown = ['']
+
+        def on_progress(stage: str, done: int, total: int,
+                        _shown=shown) -> None:
+            msg = '%s %d/%d' % (stage, done, total)
+            if msg != _shown[0]:
+                _shown[0] = msg
+                print('\r      %-42s' % msg, end='', flush=True)
+
+        try:
+            score = transcribe_audio(path, title=name, progress=on_progress)
+        except Exception as exc:
+            print('\r      失败：%s' % exc)
+            failed += 1
+            continue
+        dest = os.path.join(out_dir, name + '(音频转谱).json')
+        n = 1
+        while os.path.exists(dest):
+            dest = os.path.join(out_dir, '%s(音频转谱) (%d).json' % (name, n))
+            n += 1
+        save_json_score(score, dest)
+        print('\r      -> %s（%d 音符，%d:%02d）%s'
+              % (os.path.basename(dest), len(score.notes),
+                 int(score.duration) // 60, int(score.duration) % 60,
+                 ' ' * 12))
+
+    print()
+    if failed:
+        print('  完成：%d 个成功，%d 个失败' % (len(files) - failed, failed))
+        return 1
+    print('  全部完成：%d 个' % len(files))
+    return 0
 
 
 def main(argv: Optional[List[str]] = None) -> int:

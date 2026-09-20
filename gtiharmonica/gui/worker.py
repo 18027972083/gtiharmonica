@@ -176,3 +176,47 @@ class LoadWorker(QThread):
             self.ready.emit(score, plan)
         except Exception as exc:
             self.failed.emit('%s' % exc)
+
+
+class AudioTranscribeWorker(QThread):
+    """音频 → 曲谱（内置 GAME ONNX 推理）。
+
+    纯 CPU 推理，一首 4 分钟的歌约 30 秒；期间发 progress 信号更新界面，
+    cancel() 可以让它在段与段之间停下。
+    """
+
+    progress = Signal(str, int, int)        # stage, done, total
+    done = Signal(object)                   # Score
+    failed = Signal(str)
+
+    def __init__(self, path: str, title: str = '', parent=None):
+        super().__init__(parent)
+        self.path = path
+        self.title = title
+        self._cancelled = False
+
+    def cancel(self) -> None:
+        self._cancelled = True
+
+    @property
+    def cancelled(self) -> bool:
+        return self._cancelled
+
+    def run(self) -> None:
+        try:
+            from ..audio2score import transcribe_audio
+            score = transcribe_audio(
+                self.path, title=self.title or None,
+                progress=lambda stage, done, total:
+                    self.progress.emit(stage, done, total),
+                should_stop=lambda: self._cancelled)
+            if self._cancelled:
+                self.failed.emit('已取消')
+                return
+            if not len(score):
+                self.failed.emit('没有识别出音符：这段音频里可能没有人声主旋律。')
+                return
+            self.done.emit(score)
+        except Exception as exc:
+            import traceback
+            self.failed.emit('%s\n%s' % (exc, traceback.format_exc(limit=3)))
