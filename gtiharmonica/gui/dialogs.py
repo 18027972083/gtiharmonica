@@ -662,6 +662,9 @@ HELP_HTML = """
 <ul>
 <li>跟着人声 / 主旋律唱的歌效果最好：它输出的是<b>单条旋律线</b>，多声部的曲子
     会被自动压成主旋律（口琴本来也只能弹一个音）。</li>
+<li><b>网易云下载的歌是 .ncm 加密格式</b>，先解密成 mp3：装好 ncmdump 后
+    <code>python -c "import ncmdump,glob;[ncmdump.dump(f) for f in glob.glob(chr(39)+chr(42)+chr(46)+chr(110)+chr(99)+chr(109)+chr(39))]"</code>
+    在本机实测可用（本机已装 ncmdump）。</li>
 <li>伴奏很满的歌会混进一些杂音 —— 先用「分离人声」那套处理一遍再转，会干净很多。</li>
 <li>转出来的音常见 ±1 半音漂移，在编辑器里点「调内吸附」就能修。</li>
 <li>命令行可以批量转：<code>大肥鲸洲琴工具包.exe transcribe 目录 -o 输出目录</code></li>

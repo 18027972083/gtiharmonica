@@ -98,6 +98,11 @@ MIDI 文件拖进窗口（或从「导入 MIDI / 曲谱」选中）后会让你�
     本机 CPU 推理（一首 4 分钟的歌约 30 秒），转完自动加进曲库。
     支持 mp3 / wav / flac / ogg / m4a 等格式。
 
+※ 网易云下载的歌是 .ncm 加密格式，本程序不直接读：先用 ncmdump 之类的
+  工具解成 mp3（本机已装：python -m pip install ncmdump，然后在音乐目录里
+  python -c "import ncmdump,glob;[ncmdump.dump(f) for f in glob.glob('*.ncm')]"），
+  再用上面的「音频转曲谱」。
+
 效果与建议
 * 跟着人声 / 主旋律唱的歌效果最好。它输出的是**单条旋律线** —— 多声部的
   曲子会被自动压成主旋律（口琴本来也只能弹一个音）。
