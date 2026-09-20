@@ -230,6 +230,7 @@ class MainWindow(QMainWindow):
         gear_menu.addAction('设置…', self.show_settings)
         gear_menu.addSeparator()
         gear_menu.addAction('使用说明', self.show_help)
+        gear_menu.addAction('如何添加曲谱', self.show_add_guide)
         gear_menu.addAction('关于', self.show_about)
         self.btn_gear.setMenu(gear_menu)
         top.addWidget(self.btn_gear)
@@ -608,6 +609,11 @@ class MainWindow(QMainWindow):
             style = combo_style()
             for combo in self.findChildren(QComboBox):
                 combo.setStyleSheet(style)
+        # 公告放在主窗口显示之后再弹（showEvent 里直接 exec 会重入事件循环），
+        # 每次进程只查一次。
+        if not getattr(self, '_announce_checked', False):
+            self._announce_checked = True
+            QTimer.singleShot(300, self._maybe_show_announcement)
 
     def save_arrangement(self) -> None:
         """把当前编排结果存成曲谱文件。
@@ -1663,6 +1669,27 @@ class MainWindow(QMainWindow):
     def show_help(self) -> None:
         from .dialogs import HelpDialog
         HelpDialog(self).exec()
+
+    def show_add_guide(self) -> None:
+        """常驻入口：公告同款内容，随时可查。"""
+        from .dialogs import AnnouncementDialog
+        AnnouncementDialog(self).exec()
+
+    def _maybe_show_announcement(self) -> None:
+        """首次运行 / 版本更新后显示一次公告（添加曲谱的方式）。
+
+        已读标记存 QSettings 的 announce_seen —— 存的是公告标识字符串，
+        将来发新公告只要改 dialogs.ANNOUNCE_ID，老用户会再看一次。
+        自动化环境（无人点击）用 GTIHARMONICA_NO_ANNOUNCE=1 跳过。
+        """
+        from .dialogs import ANNOUNCE_ID, AnnouncementDialog
+
+        if os.environ.get('GTIHARMONICA_NO_ANNOUNCE'):
+            return
+        if self.settings.value('announce_seen', '') == ANNOUNCE_ID:
+            return
+        AnnouncementDialog(self).exec()
+        self.settings.setValue('announce_seen', ANNOUNCE_ID)
 
     def show_about(self) -> None:
         from .dialogs import AboutDialog

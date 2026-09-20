@@ -109,7 +109,8 @@ if not bad_scores:
 # 3. 全部对话框：真实参数构建 + 渲染
 # ------------------------------------------------------------------
 from gtiharmonica.gui.dialogs import (AboutDialog, AnalysisDialog,
-                                      CalibrateDialog, HelpDialog,
+                                      AnnouncementDialog, CalibrateDialog,
+                                      HelpDialog,
                                       ImportModeDialog, KeymapDialog,
                                       SettingsDialog)
 from gtiharmonica.gui.jianpu_dialog import JianpuDialog
@@ -131,6 +132,8 @@ dialog_case('键位速查表（KeymapDialog）',
 dialog_case('设置（SettingsDialog）',
             lambda: SettingsDialog(3, True, True, scheduler, win))
 dialog_case('使用说明（HelpDialog）', lambda: HelpDialog(win))
+dialog_case('公告·添加曲谱（AnnouncementDialog）',
+            lambda: AnnouncementDialog(win))
 dialog_case('关于（AboutDialog）', lambda: AboutDialog(win))
 if score_now is not None:
     dialog_case('策略分析（AnalysisDialog）',
