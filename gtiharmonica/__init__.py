@@ -12,7 +12,7 @@
 原始分析对象为闭源程序 GTIartist v1.1，本包的所有代码均为独立重写。
 """
 
-__version__ = '1.1.3'
+__version__ = '1.1.4'
 __all__ = [
     'Instrument', 'Fingering', 'note_name', 'KEYS', 'STEPS',
     'Score', 'Note', 'load_score', 'load_midi',

@@ -27,8 +27,8 @@ from gtiharmonica.audio2score import transcribe_audio           # noqa: E402
 from gtiharmonica.instrument import note_name                   # noqa: E402
 from gtiharmonica.score import load_score                       # noqa: E402
 
-MIDI = sys.argv[1] if len(sys.argv) > 1 else \
-    'C:/Users/23913/Downloads/心似烟火.mid'
+MIDI = sys.argv[1] if len(sys.argv) > 1 else os.path.join(
+    os.path.expanduser('~'), 'Downloads', '心似烟火.mid')
 RENDERED = os.path.join(ROOT, 'build', '_xsyh_rendered.wav')
 
 
