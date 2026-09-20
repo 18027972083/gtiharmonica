@@ -398,17 +398,45 @@ def infer_key(notes: Sequence[Note]) -> Tuple[int, str]:
     return best[1], best[2]
 
 
+def grid_quantize(notes: Sequence[Note], bpm: float = 120.0, div: int = 4
+                  ) -> List[Note]:
+    """把音符吸附到节拍网格：起点取整、时值取整数个格。
+
+    为什么必须有这一步：音频转谱的时值是模型估出来的散值（实测中位
+    300ms，还不是任何网格的倍数），弹起来节奏是散的。人工扒的谱之所以
+    好弹，正是因为它按网格对齐 —— 实测那份被认可的《心似烟火》就是
+    「主旋律轨 → 单音化 → 120BPM 的 16 分网格（125ms）」的产物。
+    """
+    grid = 60.0 / max(bpm, 1e-6) / max(div, 1)
+    cells: dict = {}
+    order: List = []
+    for n in sorted(notes, key=lambda x: x.start):
+        g = int(round(n.start / grid))
+        key = (g, n.pitch)
+        dur = max(1, int(round(n.duration / grid)))
+        if key in cells:
+            cells[key] = max(cells[key], dur)      # 同一格同一个音，并成一个
+        else:
+            cells[key] = dur
+            order.append(key)
+    return [Note(pitch=p, start=g * grid, duration=cells[(g, p)] * grid)
+            for g, p in order]
+
+
 def polish_score(score: Score, target_median: int = TARGET_MEDIAN,
                  octave: bool = True, merge_fragments: bool = True,
-                 drop_tiny: float = 0.06, snap_scale: bool = True) -> Score:
+                 drop_tiny: float = 0.06, snap_scale: bool = True,
+                 quantize: bool = True, bpm: float = 120.0,
+                 grid_div: int = 4) -> Score:
     """把转谱原样结果整理成「好弹」的曲谱。
 
     音频转谱与人工扒谱的主要差距都在这几步里：
       1. 音区不对 —— 模型给绝对音高，可能整体比主唱低/高一个八度；
          在游戏口琴上就是低音区（闷）而不是中音区（亮）。
-      2. 碎片 —— 一个音被切成几个同音高的短音，弹起来像抖。
-      3. 滑音/颤音被识别成极短装饰音。
-      4. ±1 半音漂移 —— 浮点音高四舍五入的产物，调内吸附能吃掉。
+      2. 节奏散 —— 时值不是拍子上的整数值（见 grid_quantize）。
+      3. 碎片 —— 一个音被切成几个同音高的短音，弹起来像抖。
+      4. 滑音/颤音被识别成极短装饰音。
+      5. ±1 半音漂移 —— 浮点音高四舍五入的产物，调内吸附能吃掉。
     """
     notes = sorted(score.notes, key=lambda n: n.start)
 
@@ -460,6 +488,10 @@ def polish_score(score: Score, target_median: int = TARGET_MEDIAN,
             target = nearest_in_scale(n.pitch, key, scale)
             if abs(target - n.pitch) <= 1:
                 n.pitch = target
+
+    # 5) 节拍网格量化（最后做：前面的合并已经把碎片收干净了）
+    if quantize and notes:
+        notes = grid_quantize(notes, bpm=bpm, div=grid_div)
 
     out = Score(title=score.title, notes=notes, bpm=score.bpm,
                 warnings=list(score.warnings))

@@ -145,16 +145,22 @@ def import_mode_case():
     dlg.show()
     render(dlg)
     rbs = dlg._buttons
-    assert rbs[0].isChecked() and not rbs[1].isChecked(), '初始应恰有一项选中'
+    assert len(rbs) == 3, '应有三个导入模式（直转 / 单轨提取 / 旋律化）'
     cards = [c for c in dlg.findChildren(QFrame) if c.objectName() == 'card']
-    QTest.mouseClick(cards[1], Qt.LeftButton, pos=QPoint(20, 20))
-    assert rbs[1].isChecked() and not rbs[0].isChecked(), '点卡片应互斥切换'
-    assert dlg.mode == 'melody'
-    QTest.mouseClick(cards[1], Qt.LeftButton, pos=QPoint(20, 20))
-    assert rbs[1].isChecked(), '点已选卡片不能变成双不选'
+    n_checked = sum(1 for rb in rbs if rb.isChecked())
+    assert n_checked == 1, '初始应恰有一项选中，实际 %d' % n_checked
+    assert dlg.mode == 'track', '默认应落在推荐项「单轨提取」，实际 %r' % dlg.mode
+    # 逐个点一遍：互斥切换 + 点已选卡片不会变成双不选
+    for idx, want in ((0, 'direct'), (1, 'track'), (2, 'melody')):
+        QTest.mouseClick(cards[idx], Qt.LeftButton, pos=QPoint(20, 20))
+        assert dlg.mode == want, '点第 %d 张卡应切到 %r，实际 %r' % (idx, want, dlg.mode)
+        assert rbs[idx].isChecked(), '第 %d 项应被选中' % idx
+        assert sum(1 for rb in rbs if rb.isChecked()) == 1, '不应出现多选'
+    QTest.mouseClick(cards[2], Qt.LeftButton, pos=QPoint(20, 20))
+    assert rbs[2].isChecked(), '点已选卡片不能变成双不选'
     dlg.close()
     dlg.deleteLater()
-case('MIDI 导入二选一（互斥+整卡点击）')(import_mode_case)
+case('MIDI 导入三选一（互斥+整卡点击）')(import_mode_case)
 dialog_case('导入简谱（JianpuDialog）',
             lambda: JianpuDialog(os.path.join(ROOT, 'songs'), win))
 
