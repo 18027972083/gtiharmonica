@@ -116,7 +116,12 @@ MIDI，再拖进本程序。
    的片段，混着伴奏时它切不出来，会直接报错
        "Slice duration exceeds 60 seconds"
    （进度卡在 10% 左右然后弹错误框）。两个办法：
-     * 先把人声分离出来（UVR5 之类的工具）再整首转 —— 效果最好；
+     * 先把人声分离出来再整首转 —— 效果最好。分离工具都是开源的：
+         - UVR5（图形界面）：GitHub 的 Anjok07/ultimatevocalremovergui，
+           选 MDX-NET 里的 UVR-MDX-NET-Inst_HQ_3，只输出 vocals；
+         - demucs（命令行）：pip install demucs 之后
+           demucs --two-stems=vocals 歌曲.mp3
+           人声在 separated/htdemucs/歌曲/vocals.wav。
      * 或者把音频手动切成 ≤55 秒的小段，逐段转换，最后按顺序把 MIDI
        拼起来（实测可行，代价是切点处可能有个别音被截断）。
    切段命令（有 ffmpeg 的话）：

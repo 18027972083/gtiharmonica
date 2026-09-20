@@ -675,7 +675,14 @@ Input Audio File 选音频 → Output MIDI File 选输出位置 → 点 <b>Conve
     伴奏时它切不出来，会直接报 <i>Slice duration exceeds 60 seconds</i>
     （进度卡在 10% 左右然后弹错误框）。两个办法：
     <ul>
-    <li>先把人声分离出来（UVR5 之类的工具）再整首转 —— 效果最好；</li>
+    <li>先把人声分离出来再整首转 —— 效果最好。分离工具都是开源的：
+        <ul>
+        <li><b>UVR5</b>（图形界面）：GitHub 搜 <code>Anjok07/ultimatevocalremovergui</code>，
+            选 MDX-NET 里的 <code>UVR-MDX-NET-Inst_HQ_3</code>，只输出 vocals；</li>
+        <li><b>demucs</b>（命令行）：<code>pip install demucs</code> 之后
+            <code>demucs --two-stems=vocals 歌曲.mp3</code>，人声在
+            <code>separated/htdemucs/歌曲/vocals.wav</code>。</li>
+        </ul></li>
     <li>或者把音频手动切成 <b>≤55 秒</b>的小段，逐段转换，最后按顺序把
         MIDI 拼起来（实测可行，代价是切点处可能有个别音被截断）。</li>
     </ul></li>
