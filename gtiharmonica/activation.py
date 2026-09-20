@@ -2,8 +2,10 @@
 
 设计取舍：
 
-* **卡密只存哈希**。源码里没有明文卡密，比对的是
-  ``sha256(SALT + 输入)`` —— 反编译也读不出卡密本身。
+* **卡密只存慢哈希**。源码里没有明文卡密，比对的是
+  ``PBKDF2-HMAC-SHA256(SALT, 输入, 60 万次)``。卡密是短数字串，普通
+  sha256 几秒就能被暴力枚举；用慢哈希把单次校验抬到 ~0.09s，全枚举
+  要十天量级 —— 而用户侧完全无感（每次启动只校验一次）。
 * **凭证绑定机器码**。机器码取自 Windows 的 MachineGuid（重装系统才变），
   凭证 = ``sha256(SALT + 机器码 + 卡密哈希)``。把程序目录整个拷到另一台
   机器，凭证对不上机器码，需要在新机器上重新激活。
@@ -21,14 +23,25 @@ import time
 
 SALT = 'gtiharmonica::license::v1'
 
-#: 卡密的 sha256(SALT + 卡密)。这里是哈希，不是卡密本身。
-KEY_HASH = 'e00d3aeea36d8e27522d223a5dbe24efc87240084aed7bb904759ec2f7c4a741'
+#: 卡密校验的 KDF 迭代次数。0.09s/次对用户无感，对暴力枚举是六位数门槛。
+KDF_ITERATIONS = 600_000
+
+#: 卡密的 PBKDF2-HMAC-SHA256(SALT, 卡密, KDF_ITERATIONS) 摘要。
+#: 这里是哈希，不是卡密本身。
+KEY_HASH = 'c5ac6c6444c2d70bf2cdecd97f38345e0814d015c8477b5aa0015bd34581bf18'
 
 LICENSE_FILE = '.license.json'
 
 
-def _hash(text: str) -> str:
+def _fast(text: str) -> str:
+    """普通摘要：机器码 / 凭证这类非机密用途，要快。"""
     return hashlib.sha256((SALT + text).encode('utf8')).hexdigest()
+
+
+def _kdf(text: str) -> str:
+    """慢哈希：卡密这类短秘密走这条。"""
+    return hashlib.pbkdf2_hmac('sha256', text.encode('utf8'),
+                               SALT.encode('utf8'), KDF_ITERATIONS).hex()
 
 
 # ---------------------------------------------------------------------------
@@ -53,12 +66,12 @@ def _machine_guid() -> str:
 
 def machine_id() -> str:
     """本机机器码（16 位十六进制摘要）。"""
-    return _hash(_machine_guid())[:16]
+    return _fast(_machine_guid())[:16]
 
 
 def _expected_token() -> str:
     """本机应持有的凭证摘要：机器码与卡密哈希绑在一起。"""
-    return _hash(machine_id() + KEY_HASH)
+    return _fast(machine_id() + KEY_HASH)
 
 
 # ---------------------------------------------------------------------------
@@ -67,7 +80,7 @@ def _expected_token() -> str:
 
 def verify_key(text: str) -> bool:
     """卡密是否正确。空串、带空格都能正确处理。"""
-    return bool(text) and _hash(text.strip()) == KEY_HASH
+    return bool(text) and _kdf(text.strip()) == KEY_HASH
 
 
 # ---------------------------------------------------------------------------
