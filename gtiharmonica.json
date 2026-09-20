@@ -1,0 +1,48 @@
+{
+ "instrument": {
+  "base": 60,
+  "keys": [
+   "z",
+   "x",
+   "c",
+   "v",
+   "b",
+   "n",
+   "m",
+   ","
+  ],
+  "lower": "mouse_left",
+  "semitone": "mouse_middle",
+  "upper": "mouse_right",
+  "semitone_step": 1
+ },
+ "options": {
+  "speed": 1.0,
+  "gate": 0.9,
+  "breath_ms": 90,
+  "min_gap": 0.012,
+  "phrase_gap": 0.18,
+  "breath_ratio": 0.3,
+  "min_note": 0.02,
+  "transpose": 0,
+  "fold_octaves": true,
+  "fold_prefer": "nearest",
+  "chord_policy": "highest",
+  "chord_tolerance": 0.001,
+  "strategy": "optimal",
+  "track": null
+ },
+ "cost": {
+  "modifier_switch": 1.0,
+  "key_move": 0.35,
+  "extra_press": 0.3,
+  "key_repeat_bonus": -0.2,
+  "octave_jump": 0.15
+ },
+ "scheduler": {
+  "spin_window": 0.002,
+  "poll_interval": 0.02,
+  "tight": true,
+  "epsilon": 0.0005
+ }
+}
