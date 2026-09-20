@@ -1239,15 +1239,19 @@ class MainWindow(QMainWindow):
             backend = DryRunBackend(verbose=False)
             plan = self.plan
             self.play_worker = None
+            self.overlay.stop_hidden()      # 倒计时结束，收起悬浮窗
             self._run_dry_run(plan)
             return
 
         api, hwnd, title, pid = self._target_window()
         own = int(self.winId())
         if not self._check_target_elevation(hwnd, title or '游戏'):
+            # 这里必须把悬浮窗收起来：不然它会一直停在倒计时数字上
+            self.overlay.stop_hidden()
             self._update_actions()
             return
         if hwnd == own or not title:
+            self.overlay.stop_hidden()
             self.showNormal()
             self.raise_()
             self.activateWindow()
@@ -1265,6 +1269,7 @@ class MainWindow(QMainWindow):
         try:
             plan = arrange(self.score, self.instrument, self.options)
         except ValueError as exc:
+            self.overlay.stop_hidden()
             QMessageBox.warning(self, '编排失败', str(exc))
             self._update_actions()
             return

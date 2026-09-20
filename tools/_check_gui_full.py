@@ -349,6 +349,44 @@ def favorite_case():
 case('收藏与删除名单（星标 / 过滤 / 不复活）')(favorite_case)
 
 # ------------------------------------------------------------------
+# 3.9 放弃演奏时必须收起悬浮窗（用户报的「卡住」）
+# ------------------------------------------------------------------
+def overlay_abort_case():
+    """没识别到游戏窗口就点演奏：悬浮窗不能停在倒计时数字上。
+
+    回归背景：倒计时结束后发现前台是本程序自己，会弹「需要先切到游戏」，
+    但那时的实现只更新了按钮、没管悬浮窗 —— 它会一直显示倒计时数字，
+    看起来就像卡死了。
+    """
+    from PySide6.QtWidgets import QMessageBox
+
+    from gtiharmonica.backend import load_user32
+
+    saved_info = QMessageBox.information
+    QMessageBox.information = staticmethod(lambda *a, **k: None)
+    saved_target = win._target_window
+    saved_elev = win._check_target_elevation
+    saved_cd = win.countdown_seconds
+    try:
+        # 让「目标窗口」指向本程序自己 → 命中「需要先切到游戏」那条路径
+        win._target_window = lambda: (load_user32(), int(win.winId()),
+                                      '大肥鲸洲琴工具包', os.getpid())
+        win._check_target_elevation = lambda *a, **k: True
+        win.countdown_seconds = 0
+        win.start_play()
+        pump(400)
+        assert not win.overlay.isVisible(), '放弃演奏后悬浮窗必须收起'
+        assert win.play_worker is None, '不该起播放线程'
+        assert '已取消' in win.status_label.text() or '无效' in win.status_label.text(),             win.status_label.text()
+    finally:
+        QMessageBox.information = saved_info
+        win._target_window = saved_target
+        win._check_target_elevation = saved_elev
+        win.countdown_seconds = saved_cd
+case('放弃演奏时收起悬浮窗（无目标窗口）')(overlay_abort_case)
+
+
+# ------------------------------------------------------------------
 # 4. 悬浮窗全生命周期（倒计时→演奏→暂停→续播→结束）
 # ------------------------------------------------------------------
 def overlay_flow():
