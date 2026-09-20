@@ -32,10 +32,12 @@ from .score import Note, Score
 TIMESTEP = 0.01
 SAMPLE_RATE = 44100
 
-#: 推理阈值：与 GameInfer.exe 界面默认值保持一致
-SEG_THRESHOLD = 0.2       # 分割阈值 --seg-threshold
+#: 推理阈值。分割阈值决定「音符切得多细」：调低 → 更多更短的音符。
+#: 实测同一段人声（心似烟火）：0.2 → 中位 340ms/506 音符，0.05 → 240ms/548。
+#: 取 0.1 是折中 —— 再细的边界在游戏里也按不出来（口琴有最短可识别音长）。
+SEG_THRESHOLD = 0.1       # 分割阈值 --seg-threshold
 SEG_RADIUS_SEC = 0.02     # 分割半径 20ms --seg-radius（换算成帧 = 2）
-EST_THRESHOLD = 0.2       # 估计阈值 --est-threshold
+EST_THRESHOLD = 0.2       # 估计阈值 --est-threshold（影响音高判定，不影响分割）
 NSTEPS = 8                # D3PM 采样步数 --seg-d3pm-nsteps
 
 #: 单段最长秒数。GAME 靠静音切分，素材里没有足够安静段时它切不出来，
@@ -353,17 +355,132 @@ class GameOnnx:
 
 
 # ---------------------------------------------------------------------------
+# 转谱后处理：把「能听」整理成「能弹」
+# ---------------------------------------------------------------------------
+
+#: 大 / 小调音阶（半音程）
+_MAJOR = (0, 2, 4, 5, 7, 9, 11)
+_MINOR = (0, 2, 3, 5, 7, 8, 10)
+
+#: 音区规整的目标中位音高。C5 一带是「唱歌」的听感区：游戏口琴在这一带
+#: 最亮、最像人声；低音区（C4 往下）明显发闷 —— 转谱结果经常整体低一个
+#: 八度，听感差距主要来自这里。
+TARGET_MEDIAN = 72
+
+
+def playable_range() -> Tuple[int, int]:
+    """游戏里可演奏的音高范围（音区规整不能把旋律推出这个范围）。"""
+    try:
+        from .instrument import Instrument
+        lo, hi = Instrument().playable_range()
+        return int(lo), int(hi)
+    except Exception:
+        return 48, 85
+
+
+def infer_key(notes: Sequence[Note]) -> Tuple[int, str]:
+    """从音高分布推调性与调式（Krumhansl 模板的简化版）。
+
+    转谱结果是绝对音高，没有调号信息；调内吸附需要一个 key 才能用。
+    """
+    hist = [0.0] * 12
+    for n in notes:
+        hist[n.pitch % 12] += 1.0
+    total = sum(hist) or 1.0
+    hist = [h / total for h in hist]
+    best = (None, 0, 'major')
+    for root in range(12):
+        for scale, steps in (('major', _MAJOR), ('minor', _MINOR)):
+            s = sum(hist[(root + k) % 12] for k in steps)
+            s += 0.5 * hist[root] + 0.25 * hist[(root + 7) % 12]   # 主音/属音加权
+            if best[0] is None or s > best[0]:
+                best = (s, root, scale)
+    return best[1], best[2]
+
+
+def polish_score(score: Score, target_median: int = TARGET_MEDIAN,
+                 octave: bool = True, merge_fragments: bool = True,
+                 drop_tiny: float = 0.06, snap_scale: bool = True) -> Score:
+    """把转谱原样结果整理成「好弹」的曲谱。
+
+    音频转谱与人工扒谱的主要差距都在这几步里：
+      1. 音区不对 —— 模型给绝对音高，可能整体比主唱低/高一个八度；
+         在游戏口琴上就是低音区（闷）而不是中音区（亮）。
+      2. 碎片 —— 一个音被切成几个同音高的短音，弹起来像抖。
+      3. 滑音/颤音被识别成极短装饰音。
+      4. ±1 半音漂移 —— 浮点音高四舍五入的产物，调内吸附能吃掉。
+    """
+    notes = sorted(score.notes, key=lambda n: n.start)
+
+    # 1) 音区规整：整条旋律平移到「最接近目标中位、且不超出游戏音域」的八度
+    if octave and notes:
+        pitches = sorted(n.pitch for n in notes)
+        median = pitches[len(pitches) // 2]
+        lo, hi = pitches[0], pitches[-1]
+        limit_lo, limit_hi = playable_range()
+        best_k, best_cost = 0, None
+        for k in (-2, -1, 0, 1, 2):
+            if lo + 12 * k < limit_lo or hi + 12 * k > limit_hi:
+                continue                      # 挪出去就弹不了了，跳过
+            cost = abs(median + 12 * k - target_median)
+            if best_cost is None or cost < best_cost:
+                best_k, best_cost = k, cost
+        if best_k:
+            for n in notes:
+                n.pitch += 12 * best_k
+
+    # 2) 去极短装饰音（先删，免得它们把后面的合并带偏）
+    if drop_tiny > 0 and len(notes) > 2:
+        keep = []
+        for i, n in enumerate(notes):
+            if n.duration < drop_tiny and 0 < i < len(notes) - 1:
+                continue
+            keep.append(n)
+        notes = keep
+
+    # 3) 合并碎片：同音高、几乎相接的相邻音并成一个长音
+    if merge_fragments and len(notes) > 1:
+        merged: List[Note] = [notes[0]]
+        for n in notes[1:]:
+            prev = merged[-1]
+            if n.pitch == prev.pitch and n.start - (prev.start + prev.duration) < 0.04:
+                prev.duration = max(prev.duration, n.start + n.duration - prev.start)
+                continue
+            merged.append(n)
+        notes = merged
+
+    # 4) 调内吸附：只动偏离调式的音，且最多挪 1 个半音
+    if snap_scale and notes:
+        key, scale = infer_key(notes)
+        from .edit import nearest_in_scale, scale_pitch_classes
+        allowed = scale_pitch_classes(key, scale)
+        for n in notes:
+            if n.pitch % 12 in allowed:
+                continue
+            target = nearest_in_scale(n.pitch, key, scale)
+            if abs(target - n.pitch) <= 1:
+                n.pitch = target
+
+    out = Score(title=score.title, notes=notes, bpm=score.bpm,
+                warnings=list(score.warnings))
+    out.source = score.source
+    return out
+
+
+# ---------------------------------------------------------------------------
 # 对外入口
 # ---------------------------------------------------------------------------
 
 def transcribe_audio(path: str, title: Optional[str] = None,
                      progress: Optional[ProgressFn] = None,
                      should_stop: Optional[StopFn] = None,
-                     model_dir: Optional[str] = None) -> Score:
+                     model_dir: Optional[str] = None,
+                     polish: bool = True) -> Score:
     """音频文件 → 曲谱。
 
     :param progress: progress(阶段, 已完成, 总数)，阶段如「加载音频」「切片」「推理」
     :param should_stop: 返回 True 时中止（已算出的音符照常返回）
+    :param polish: 是否做音区规整 / 合并碎片 / 调内吸附（默认做，见 polish_score）
     """
     if progress is not None:
         progress('加载音频', 0, 1)
@@ -374,13 +491,18 @@ def transcribe_audio(path: str, title: Optional[str] = None,
     engine = GameOnnx(model_dir)
     if progress is not None:
         progress('切片', 0, 1)
-    t0 = time.time()
     notes = engine.extract(wave, progress=progress, should_stop=should_stop)
-    del t0
 
     name = title or os.path.splitext(os.path.basename(path))[0]
     out: List[Note] = []
     for start, dur, pitch in notes:
         out.append(Note(pitch=int(round(pitch)), start=float(start),
                         duration=float(dur), velocity=80))
-    return Score(title=name, notes=out, bpm=120.0)
+    score = Score(title=name, notes=out, bpm=120.0)
+    if polish:
+        if progress is not None:
+            progress('整理', 0, 1)
+        score = polish_score(score)
+        if progress is not None:
+            progress('整理', 1, 1)
+    return score
