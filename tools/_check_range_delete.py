@@ -10,6 +10,8 @@
 from __future__ import annotations
 
 import os
+# 公告框是模态的：自检没人点按钮，必须显式关掉（否则 exec() 永久阻塞）
+os.environ.setdefault('GTIHARMONICA_NO_ANNOUNCE', '1')
 import sys
 
 HERE = os.path.dirname(os.path.abspath(__file__))
@@ -27,6 +29,16 @@ from gtiharmonica.gui.main import MainWindow                    # noqa: E402
 from gtiharmonica.score import load_score                       # noqa: E402
 
 RESULTS = []
+
+# 「剪掉时间」现在动手前会弹确认框（用户报障：跨越剪口的长音被悄悄删掉）。
+# 离屏自检里没人点按钮，exec() 会永久阻塞，所以这里把确认框改成自动选
+# 「继续剪掉」—— 确认框本身在 tools/_check_gui_full.py 里有专门用例。
+from PySide6.QtWidgets import QMessageBox as _Box                # noqa: E402
+
+_Box.exec = lambda box: 0
+_Box.clickedButton = lambda box: next(
+    (b for b in box.buttons() if '继续' in b.text()),
+    box.buttons()[0] if box.buttons() else None)
 
 
 def check(name, ok, detail=''):

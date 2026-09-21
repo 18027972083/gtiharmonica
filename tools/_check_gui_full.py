@@ -23,6 +23,8 @@ os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
 # 卡密激活只拦“启动流程”，本套件直接构建主窗口不受影响；
 # 这里再兜一层，保证任何新加的启动路径都不会在无人值守时卡在激活窗。
 os.environ.setdefault('GTIHARMONICA_SKIP_ACTIVATION', '1')
+# 公告框是模态的：自检没人点按钮，必须显式关掉（否则 exec() 永久阻塞）
+os.environ.setdefault('GTIHARMONICA_NO_ANNOUNCE', '1')
 
 from PySide6.QtCore import QEventLoop, QTimer
 from PySide6.QtWidgets import QApplication

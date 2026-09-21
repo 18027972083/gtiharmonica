@@ -4,6 +4,8 @@
 产出：build/shots/*.png 以及控制台的功能断言结果。
 """
 import os
+# 公告框是模态的：自检没人点按钮，必须显式关掉（否则 exec() 永久阻塞）
+os.environ.setdefault('GTIHARMONICA_NO_ANNOUNCE', '1')
 import sys
 import time
 import traceback

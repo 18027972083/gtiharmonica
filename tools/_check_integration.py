@@ -16,6 +16,8 @@ import sys
 import tempfile
 
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+# 公告框是模态的：自检没人点按钮，必须显式关掉（否则 exec() 永久阻塞）
+os.environ.setdefault('GTIHARMONICA_NO_ANNOUNCE', '1')
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from PySide6.QtWidgets import QApplication                      # noqa: E402

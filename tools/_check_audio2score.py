@@ -21,6 +21,8 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 ROOT = os.path.dirname(HERE)
 sys.path.insert(0, ROOT)
 os.environ.setdefault('QT_QPA_PLATFORM', 'offscreen')
+# 公告框是模态的：自检没人点按钮，必须显式关掉（否则 exec() 永久阻塞）
+os.environ.setdefault('GTIHARMONICA_NO_ANNOUNCE', '1')
 
 import numpy as np                                          # noqa: E402
 from PySide6.QtWidgets import QApplication                  # noqa: E402
