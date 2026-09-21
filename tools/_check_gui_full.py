@@ -456,3 +456,27 @@ if failures:
     sys.exit(1)
 print('=== 全部通过（%s 主题，%d 首曲子，7 个对话框，悬浮窗全流程）==='
       % (THEME, len(songs)))
+
+def focus_and_standby_case():
+    """失焦（切到别的程序）应按暂停处理；F8 待命启动已接好。
+
+    真实触发需要模拟前台窗口，这里做代码级校验：异常类型在、发送循环
+    捕获它、_pump 主动检测焦点、待命检查挂在主窗口上。
+    """
+    import inspect
+    from gtiharmonica import backend, player
+    from gtiharmonica.gui.main import MainWindow
+
+    assert issubclass(backend.FocusLost, Exception)
+    assert issubclass(backend.FocusOnSelf, Exception)
+
+    send_loop = inspect.getsource(player.Player._run_once)
+    assert 'FocusLost' in send_loop, '发送循环应把 FocusLost 一并按暂停处理'
+    pump = inspect.getsource(player.Player._pump)
+    assert '_target_foreground' in pump, '_pump 应主动检测前台是否还是游戏'
+
+    assert hasattr(MainWindow, '_standby_check'), '缺少 F8 待命检查'
+    assert hasattr(MainWindow, '_foreground_is_game'), '缺少游戏窗口识别'
+
+
+case('失焦暂停 + F8 待命启动（代码级）')(focus_and_standby_case)

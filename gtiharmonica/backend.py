@@ -107,6 +107,15 @@ class FocusOnSelf(Exception):
     """前台切回了本程序：应当暂停等待用户回到游戏，而不是中断演奏。"""
 
 
+class FocusLost(Exception):
+    """前台切到了别的程序：同样按「暂停」处理。
+
+    早先这里抛 OSError，表现是「切出去看一眼再回来，演奏已经结束、
+    悬浮窗也没了」。可按键本来就不可能发出去（前台不是游戏），
+    暂停等用户回游戏按 F8 继续，才是安全又符合直觉的反应。
+    """
+
+
 def raise_timer_resolution(period_ms: int = 1) -> bool:
     """把系统计时器精度提到 1 ms（Windows 默认 15.6 ms）。
 
@@ -285,6 +294,15 @@ class SendInputBackend(Backend):
         """前台是否切回了本程序（关闭「保持焦点」时不判断）。"""
         return self.keep_focus and foreground_is_self(self.api)
 
+    def target_foreground(self) -> bool:
+        """前台是不是目标窗口（关闭「保持焦点」时恒为 True）。"""
+        if not self.keep_focus:
+            return True
+        try:
+            return self.api.GetForegroundWindow() == self.hwnd
+        except Exception:
+            return True
+
     def check_focus(self) -> None:
         if not self.keep_focus:
             return
@@ -294,8 +312,11 @@ class SendInputBackend(Backend):
         if foreground_is_self(self.api):
             # 用户切回本程序（看进度、按 F8 暂停）：暂停，不算出错
             raise FocusOnSelf('前台切回了本程序')
-        raise OSError('目标窗口已失去焦点（当前窗口 %r），演奏停止'
-                      % (window_title(self.api, current) or '未知'))
+        # 切到了别的程序：按键本来就发不出去，按暂停处理（切回游戏
+        # 按 F8 即可继续）。早先这里抛 OSError 直接结束演奏，表现就是
+        # 「切出去看一眼，回来悬浮窗都没了」。
+        raise FocusLost('前台切到了别的程序（%s），已暂停'
+                        % (window_title(self.api, current) or '未知'))
 
     def play(self, step: PlayStep) -> None:
         self.check_focus()

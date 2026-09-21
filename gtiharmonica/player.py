@@ -15,8 +15,9 @@ from enum import Enum
 from typing import Callable, List, Optional
 
 from .arrange import Arrangement, PlayStep
-from .backend import (Backend, FocusOnSelf, foreground_is_self, load_user32,
-                      raise_timer_resolution, restore_timer_resolution)
+from .backend import (Backend, FocusLost, FocusOnSelf, foreground_is_self,
+                      load_user32, raise_timer_resolution,
+                      restore_timer_resolution)
 
 # 虚拟键码
 VK_F5 = 0x74
@@ -350,9 +351,11 @@ class Player:
                         # 保证本音至少被完整采样一帧
                         offset += timing['min_hold'] - (next_start - step.start)
                     index += 1
-                except FocusOnSelf:
-                    # 正要发按键的一瞬间前台切回了本程序：暂停，本音重来
-                    self.pause(reason='focus')
+                except (FocusOnSelf, FocusLost) as exc:
+                    # 正要发按键的一瞬间前台跑了（切回本程序 / 切到别的
+                    # 程序）：暂停，本音重来，别把整场演奏丢掉
+                    self.pause(reason='focus' if isinstance(exc, FocusOnSelf)
+                               else 'lost')
                     continue
             self.state = State.FINISHED
         except PlayAborted:
@@ -451,6 +454,11 @@ class Player:
                     # 用户切回本程序（看进度、按 F8）：暂停而不是中断
                     self.pause(reason='focus')
                     continue
+                if not self._target_foreground():
+                    # 前台既不是本程序也不是游戏（比如切去看攻略）：
+                    # 按键发不出去，暂停等着，回游戏按 F8 继续
+                    self.pause(reason='lost')
+                    continue
                 return True
             if self.state in (State.STOPPED, State.ERROR, State.FINISHED):
                 return False
@@ -465,6 +473,16 @@ class Player:
             return bool(probe())
         except Exception:
             return False
+
+    def _target_foreground(self) -> bool:
+        """前台是不是仍然是目标窗口。后端不支持时恒为 True。"""
+        probe = getattr(self.backend, 'target_foreground', None)
+        if probe is None:
+            return True
+        try:
+            return bool(probe())
+        except Exception:
+            return True
 
     #: 热键轮询间隔（见模块级 HOTKEY_SLICE 的说明）
     HOTKEY_SLICE = HOTKEY_SLICE

@@ -456,7 +456,7 @@ class SettingsDialog(QDialog):
 
     def __init__(self, countdown: int, keep_focus: bool, minimize: bool,
                  scheduler: SchedulerConfig, parent=None, loop: bool = False,
-                 theme_mode: str = 'dark'):
+                 theme_mode: str = 'dark', f8_standby: bool = True):
         super().__init__(parent)
         self.setWindowTitle('设置')
         self.resize(520, 420)
@@ -473,14 +473,21 @@ class SettingsDialog(QDialog):
         self.sp_countdown.setToolTip('点「演奏」后留给你切回游戏的时间。设 0 表示立即开始。')
         f1.addRow('开场倒计时', self.sp_countdown)
 
-        self.chk_focus = QCheckBox('目标窗口失去焦点时自动停止')
+        self.chk_focus = QCheckBox('目标窗口失去焦点时自动暂停')
         self.chk_focus.setChecked(keep_focus)
-        self.chk_focus.setToolTip('强烈建议保持开启，避免误操作到其他窗口。')
+        self.chk_focus.setToolTip(
+            '切走时暂停（按键不会误发到别的窗口），切回游戏按 F8 接着弹。'
+            '\n强烈建议保持开启。')
         f1.addRow('', self.chk_focus)
 
         self.chk_min = QCheckBox('开始演奏时自动最小化本窗口')
         self.chk_min.setChecked(minimize)
         f1.addRow('', self.chk_min)
+        self.chk_standby = QCheckBox('游戏在前台时按 F8 直接开始演奏')
+        self.chk_standby.setChecked(f8_standby)
+        self.chk_standby.setToolTip(
+            '在游戏里按 F8 立刻开始弹当前曲目，不用切回本程序点按钮。'
+            '\n演奏中 F8 仍是暂停/继续。')
 
         self.chk_loop = QCheckBox('循环播放（播完自动从头再来，F9 停止）')
         self.chk_loop.setChecked(loop)
@@ -590,7 +597,8 @@ class SettingsDialog(QDialog):
 
     def values(self):
         return (self.sp_countdown.value(), self.chk_focus.isChecked(),
-                self.chk_min.isChecked(), self.chk_loop.isChecked())
+                self.chk_min.isChecked(), self.chk_loop.isChecked(),
+                self.chk_standby.isChecked())
 
     def theme_mode(self) -> str:
         return self.cb_theme.currentData() or '''dark'''
@@ -875,24 +883,23 @@ class HelpDialog(QDialog):
 
 #: 公告标识：**改这个值就等于发一条新公告** —— 老用户升级后会再看一次。
 #: 读已标记记录在 QSettings 的 announce_seen 里（存标识字符串，不存布尔）。
-ANNOUNCE_ID = '2026-09-20-v114-update'
+ANNOUNCE_ID = '2026-09-20-v115-update'
 
 ANNOUNCEMENT_HTML = """
-<h2>更新公告 · v1.1.4</h2>
+<h2>更新公告 · v1.1.5</h2>
 <p>本次更新：</p>
 <ul>
-<li><b>卡密激活</b>：首次打开需要输入卡密激活（一次即可）。验证完全在本机
-    完成，不联网、不上传任何信息。</li>
-<li><b>新增「如何添加曲谱」指引</b>（齿轮菜单里随时可查）。要点：
-    三角洲口琴只能弹单音轨，到 midishow 等站点挑谱用三招 ——
-    搜「<b>原琴</b>」、搜「<b>调教用</b>」、按<b>音轨数</b>筛「1 个音轨」；
-    下载的 .mid 拖进窗口，选「单轨提取」（默认项）即入库。</li>
-<li><b>修复「重建快捷方式」误报失败</b>：中文系统上快捷方式其实已经建好，
-    界面却提示失败 —— 已修复，现在会如实显示结果。</li>
-<li><b>音频转曲谱定位为备选</b>：能找到现成的单轨 MIDI 就优先用 MIDI，
-    节奏与细节更稳；找不到谱再用「音频转曲谱」。</li>
+<li><b>游戏里按 F8 直接开始演奏</b>：不用切回本程序点按钮。
+    演奏中 F8 仍是暂停/继续；不需要的话可以在「设置」里关掉。</li>
+<li><b>切窗口不再中断演奏</b>：切出去看攻略、回消息，演奏是<b>暂停</b>而不是
+    结束 —— 回到游戏按 F8 接着弹（以前切走就整场停了）。</li>
+<li><b>卡密激活</b>：首次打开需要输入卡密激活（一次即可；离线验证，
+    不联网、不上传任何信息）。</li>
+<li><b>找谱指南</b>：齿轮菜单 → 如何添加曲谱。三角洲口琴只能弹单音轨，
+    挑谱三招：搜「原琴」、搜「调教用」、按音轨数筛「1 个音轨」。</li>
 </ul>
-<p style="color:#888">挑谱技巧与全部说明，见「齿轮菜单 → 如何添加曲谱 / 使用说明」。</p>
+<p style="color:#888">升级：把新压缩包解压到原来那个文件夹覆盖即可，
+曲库和设置原地保留；若首次打开提示激活，输一次卡密。</p>
 """
 
 

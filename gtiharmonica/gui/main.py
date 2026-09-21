@@ -87,6 +87,13 @@ class MainWindow(QMainWindow):
         self.countdown_seconds = int(self.settings.value('countdown', 3))
         self.minimize_on_play = self.settings.value('minimize_on_play', True, bool)
         self.loop_play = self.settings.value('loop_play', False, bool)
+        # 游戏在前台按 F8 直接开始演奏（设置里可关）
+        self.f8_standby = self.settings.value('f8_standby', True, bool)
+        self._standby_watcher = None
+        self._standby_timer = QTimer(self)
+        self._standby_timer.setInterval(60)
+        self._standby_timer.timeout.connect(self._standby_check)
+        self._standby_timer.start()
         self.theme_mode = self.settings.value('theme_mode', 'light')
 
         # 演奏悬浮窗：切到游戏后仍然看得到进度（位置记忆在 settings）
@@ -1393,7 +1400,12 @@ class MainWindow(QMainWindow):
                                        paused=True)
                 self._set_status('演奏已暂停：你切回了本程序。回到游戏后按 F8 继续')
             else:
-                self.overlay.set_state('暂停中', paused=True)
+                # 前台既不是本程序也不是游戏（切去看攻略/聊天了）：
+                # 同样是暂停，别让用户以为演奏丢了
+                self.overlay.set_state('已暂停（不在游戏窗口）· F8 继续',
+                                       paused=True)
+                self._set_status('演奏已暂停：当前前台不是游戏窗口。'
+                                 '回到游戏后按 F8 继续')
         elif state == 'playing':
             self.overlay.set_state('')
         self._update_actions()
@@ -1407,6 +1419,70 @@ class MainWindow(QMainWindow):
             return foreground_is_self(self._fg_api)
         except Exception:
             return False
+
+    def _foreground_is_game(self) -> bool:
+        """前台窗口看起来是不是游戏。
+
+        两道判据取其一：标题含 delta / 三角洲，或者窗口占满整块屏幕
+        （独占全屏和无边框窗口都满足）。窗口化的小游戏窗口不在此列，
+        这正是我们想要的 —— 别在浏览器里按 F8 就开弹。
+        """
+        try:
+            import ctypes
+            from ..backend import foreground_window, load_user32
+            api = load_user32()
+            hwnd, title, _pid = foreground_window(api)
+            if not hwnd:
+                return False
+            low = (title or '').lower()
+            if 'delta' in low or '三角洲' in (title or ''):
+                return True
+
+            class _RECT(ctypes.Structure):
+                _fields_ = [('left', ctypes.c_long), ('top', ctypes.c_long),
+                            ('right', ctypes.c_long), ('bottom', ctypes.c_long)]
+
+            rect = _RECT()
+            if not api.GetWindowRect(hwnd, ctypes.byref(rect)):
+                return False
+            w = rect.right - rect.left
+            h = rect.bottom - rect.top
+            return (abs(w - api.GetSystemMetrics(0)) <= 8
+                    and abs(h - api.GetSystemMetrics(1)) <= 8)
+        except Exception:
+            return False
+
+    def _standby_check(self) -> None:
+        """待命热键：游戏在前台时按 F8 直接开始演奏。
+
+        演奏中 F8 由 player 自己的轮询处理（暂停/继续）；这里只管
+        「还没开始弹」的那段 —— 用户在游戏里按一下就能开始，不用切回
+        本程序点按钮。设置里可以关掉。
+        """
+        if not self.f8_standby:
+            return
+        if self.play_worker is not None and self.play_worker.isRunning():
+            return
+        if self._countdown_timer.isActive():
+            return
+        if self.score is None or self.plan is None or not len(self.plan.steps):
+            return
+        if self._self_is_foreground():
+            return              # 本程序在前台：F8 交给界面快捷键
+        try:
+            from ..player import VK_F8, HotkeyWatcher
+            if self._standby_watcher is None:
+                self._standby_watcher = HotkeyWatcher()
+            watcher = self._standby_watcher
+            if not watcher.down(VK_F8):
+                return
+            watcher.wait_release(VK_F8)
+        except Exception:
+            return
+        if not self._foreground_is_game():
+            return              # 在别的程序里：别误触（F8 在编辑器里很常用）
+        self._set_status('检测到 F8：直接在游戏里开始演奏')
+        self.start_play()
 
     def _on_play_done(self, state: str, timing: dict, stats: dict) -> None:
         self.keys.set_active(None, ())

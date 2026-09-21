@@ -10,7 +10,7 @@
   * 校准工具：测量最小可识别音长、SendInput 延迟、按键通过率
 """
 
-__version__ = '1.1.4'
+__version__ = '1.1.5'
 __all__ = [
     'Instrument', 'Fingering', 'note_name', 'KEYS', 'STEPS',
     'Score', 'Note', 'load_score', 'load_midi',
