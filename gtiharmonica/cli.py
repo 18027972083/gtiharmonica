@@ -432,7 +432,7 @@ def cmd_export(args) -> int:
     score = load_score(args.file)
     plan = arrange(score, instrument, options)
     out = args.out or (os.path.splitext(args.file)[0] + '.plan.json')
-    save_json_score(_plan_to_score(plan), out)
+    out = save_json_score(_plan_to_score(plan), out)       # 非 .json 会补后缀
     print('已导出演奏计划：%s（%d 个音，%.1f 秒）'
           % (out, len(plan), plan.duration))
     return 0

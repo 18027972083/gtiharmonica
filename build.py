@@ -34,7 +34,10 @@ import sys
 
 ROOT = os.path.dirname(os.path.abspath(__file__))
 BUILD = os.path.join(ROOT, 'build')
-DIST = os.path.join(ROOT, 'dist')
+#: 产物目录。默认 dist/；打包时若旧版本正在运行（里面的 DLL 被占用，
+#: 清理必然失败），用 GTI_DIST 指到别处构建，不用去关用户正在用的程序。
+DIST = os.path.abspath(os.environ.get('GTI_DIST')
+                       or os.path.join(ROOT, 'dist'))
 ICON = os.path.join(BUILD, 'app.ico')
 SPEC = os.path.join(BUILD, 'DeltaHarp.spec')
 NAME = '大肥鲸洲琴工具包'
