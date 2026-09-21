@@ -646,11 +646,13 @@ class MainWindow(QMainWindow):
             if not target:
                 return
             try:
-                save_json_score(out, target)
+                # save_json_score 会把非 .json 目标补成 .json，以它返回的
+                # 路径为准 —— 否则 score_path 指向一个没写过的文件名。
+                target = save_json_score(out, target)
             except Exception as exc:
                 QMessageBox.warning(self, '无法保存乐谱', str(exc))
                 return
-            self.editor_doc.save(target)
+            target = self.editor_doc.save(target)
             self.score_path = target
             self.library.refresh()
             self._set_status('已保存编辑结果：%s（%d 个音符）'
@@ -683,13 +685,23 @@ class MainWindow(QMainWindow):
             return
 
         try:
-            save_json_score(out, target)
+            target = save_json_score(out, target)
         except Exception as exc:
             QMessageBox.warning(self, '无法保存编排', str(exc))
             return
         self.library.refresh()
         self._set_status('已保存编排：%s（%d 个音符）'
                          % (os.path.basename(target), len(notes)))
+
+    @staticmethod
+    def _can_overwrite_source(path: str) -> bool:
+        """原曲能不能被「覆盖」—— 只有曲谱 JSON 能。
+
+        .mid / .midi 是二进制 MIDI，写进 JSON 就毁了（曲库按后缀选解析器，
+        之后打开这首曲子只会报「无法读取曲谱」）。所以那两种情况一律走
+        「另存为新曲谱」，宁可多一个文件。
+        """
+        return bool(path) and str(path).lower().endswith('.json')
 
     def _ask_save_target(self, out: Score, title: str,
                          note: str) -> Optional[str]:
@@ -698,14 +710,23 @@ class MainWindow(QMainWindow):
         编排结果和编辑结果都要走这一步，所以抽出来共用 —— 两处各写一遍
         迟早会改漏一处（比如只给其中一处加上「补 .json 后缀」）。
         """
-        has_source = bool(self.score_path) and os.path.isfile(self.score_path or '')
+        source = self.score_path or ''
+        has_source = bool(source) and os.path.isfile(source)
+        # 「覆盖原曲」只对本来就是曲谱 JSON 的原曲开放。原曲是 .mid / .midi
+        # 时不能覆盖：曲库按后缀选解析器，把 JSON 写进 .mid 会让这首曲子
+        # 之后再也读不出来（1.1.5 的真实事故：保存完提示「无法读取曲谱」）。
+        can_overwrite = has_source and self._can_overwrite_source(source)
 
         box = QMessageBox(self)
         box.setWindowTitle(title)
         box.setText('保存《%s》（%d 个音符）' % (out.title, len(out.notes)))
-        box.setInformativeText(note)
+        box.setInformativeText(
+            note if can_overwrite or not has_source else
+            note + '\n\n原曲是 MIDI 文件（%s），不能覆盖成曲谱 —— '
+                   '会另存为一个新的 .json 曲谱，MIDI 原文件保持原样。'
+                   % os.path.basename(source))
         btn_overwrite = None
-        if has_source:
+        if can_overwrite:
             btn_overwrite = box.addButton('覆盖原曲', QMessageBox.DestructiveRole)
         btn_saveas = box.addButton('另存为新曲谱…', QMessageBox.AcceptRole)
         box.addButton('取消', QMessageBox.RejectRole)

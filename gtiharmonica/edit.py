@@ -176,10 +176,12 @@ class EditDoc:
                      time_sig_den=self.time_sig_den, phase=self.phase,
                      key=self.key, scale=self.scale)
 
-    def save(self, path: str) -> None:
-        save_json_score(self.to_score(), path)
+    def save(self, path: str) -> str:
+        """保存到 path，返回真正写入的路径（非 .json 后缀会被补上）。"""
+        path = save_json_score(self.to_score(), path)
         self.source = path
         self.dirty = False
+        return path
 
     def context(self) -> NotationContext:
         return NotationContext(

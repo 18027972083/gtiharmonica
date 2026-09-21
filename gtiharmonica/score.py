@@ -318,7 +318,17 @@ def load_json_score(path: str) -> Score:
     )
 
 
-def save_json_score(score: Score, path: str) -> None:
+def save_json_score(score: Score, path: str) -> str:
+    """把曲谱写成 JSON 文件，返回真正写入的路径。
+
+    非 .json 后缀一律补上 .json。曲库是按后缀选解析器的，把 JSON 写进
+    .mid / .midi 会让那首曲子之后再也读不出来（用户真的踩过：源是 MIDI
+    时点「覆盖原曲」，保存完整个曲目报「无法读取曲谱」）。多出一个文件
+    可以删，毁掉的原文件找不回来。
+    """
+    path = str(path)
+    if not path.lower().endswith('.json'):
+        path += '.json'
     data = {
         'format': 'gtiharmonica-score-v1',
         'title': score.title,
@@ -335,16 +345,37 @@ def save_json_score(score: Score, path: str) -> None:
                    'tie': bool(n.tie)}
                   for n in score.notes],
     }
-    with open(path, 'w', encoding='utf8') as fh:
+    with open(path, 'w', encoding='utf8', newline='\n') as fh:
         json.dump(data, fh, ensure_ascii=False, indent=1)
+    return path
+
+
+def _speaks_json(path: str) -> bool:
+    """文件内容看起来是不是曲谱 JSON（不看后缀）。"""
+    try:
+        with open(path, 'rb') as fh:
+            head = fh.read(64)
+    except OSError:
+        return False
+    head = head.lstrip(b'\xef\xbb\xbf').lstrip()
+    return head[:1] in (b'{', b'[')
 
 
 def load_score(path: str) -> Score:
-    """按扩展名自动选择解析器。"""
+    """按内容 + 扩展名选择解析器。
+
+    内容优先是给**已经坏掉的曲库文件**留的活路：早先版本在源文件是 MIDI
+    时点「覆盖原曲」，会把曲谱 JSON 写进 .mid，后缀和内容对不上。这类
+    文件内容其实是好的，按内容读能把曲子救回来（保存功能本身已修）。
+    """
     ext = os.path.splitext(path)[1].lower()
     if ext in ('.mid', '.midi'):
+        if _speaks_json(path):
+            return load_json_score(path)
         return load_midi(path)
     if ext == '.json':
+        return load_json_score(path)
+    if _speaks_json(path):
         return load_json_score(path)
     raise ValueError('不支持的曲谱格式：%s' % ext)
 

@@ -447,15 +447,8 @@ case('主题切换往返')(theme_roundtrip)
 win.close()
 pump(150)
 
-print()
-if failures:
-    print('=== %d 项失败 ===' % len(failures))
-    for name, tb in failures:
-        print('---- %s ----' % name)
-        print(tb)
-    sys.exit(1)
-print('=== 全部通过（%s 主题，%d 首曲子，7 个对话框，悬浮窗全流程）==='
-      % (THEME, len(songs)))
+# 下面几组是后加的用例（失焦/保存/剪掉时间），汇总必须留在它们之后，
+# 否则这里出的失败只会显示一行 FAIL、看不到 traceback。
 
 def focus_and_standby_case():
     """失焦（切到别的程序）应按暂停处理；F8 待命启动已接好。
@@ -480,3 +473,176 @@ def focus_and_standby_case():
 
 
 case('失焦暂停 + F8 待命启动（代码级）')(focus_and_standby_case)
+
+def json_over_midi_case():
+    """源是 MIDI 时，保存绝不能把曲谱 JSON 写进 .mid 文件。
+
+    回归背景（2026-09-21 用户报障）：load_midi 的报错信息
+    「块 b'{\r\n ' 声称长度 577138546，超出文件末尾」出现在「无法读取曲谱」
+    弹窗里 —— 因为「覆盖原曲」把 JSON 写进了曲库里的 .mid。曲库按后缀
+    选解析器，文件一坏这首曲子就再也打不开了，MIDI 原文件也没了。
+    """
+    import shutil
+    import tempfile
+
+    from gtiharmonica.score import load_score, save_json_score
+
+    tmp = tempfile.mkdtemp(prefix='gti_savemid_')
+    try:
+        src = os.path.join(ROOT, 'build', 'jianpu', 'rainie_love.mid')
+        assert os.path.exists(src), '缺少测试用 MIDI：%s' % src
+        mid = os.path.join(tmp, 'rainie_love.mid')
+        shutil.copy2(src, mid)
+        with open(mid, 'rb') as fh:
+            before = fh.read()
+        n_midi = len(load_score(mid).notes)
+
+        w = MainWindow(Config(), tmp)
+        w.library.refresh()
+        w.on_library_selected(mid)
+        pump(700)
+        assert w.score is not None, '测试 MIDI 载入失败'
+        assert w._ensure_editor_doc(), '编辑文档没建起来'
+
+        # 1) 「覆盖原曲」只对曲谱 JSON 开放
+        assert not MainWindow._can_overwrite_source(mid), '.mid 不该允许覆盖'
+        assert not MainWindow._can_overwrite_source('/x/y.midi')
+        assert MainWindow._can_overwrite_source('/x/y.json')
+        assert MainWindow._can_overwrite_source('/x/Y.JSON'), '后缀判断应忽略大小写'
+        assert not MainWindow._can_overwrite_source('')
+
+        # 2) 就算调用方把 .mid 当目标传下去，也只能落到 .json
+        written = save_json_score(w.editor_doc.to_score(), mid)
+        assert written == mid + '.json', '非 .json 目标应补成 .json：%r' % written
+        with open(mid, 'rb') as fh:
+            assert fh.read() == before, 'MIDI 原文件被写坏了'
+        assert os.path.exists(written) and len(load_score(written).notes) > 0
+
+        # 3) 编辑模式下按「覆盖原曲」保存：只能落到 .json，且 score_path 跟过去
+        w.set_mode('edit')
+        pump(200)
+        w._ask_save_target = lambda *a, **k: mid     # 模拟「无论怎样都要覆盖原曲」
+        w.save_arrangement()
+        pump(400)
+        assert w.score_path.lower().endswith('.json'), \
+            '保存后 score_path 应指向 .json：%r' % w.score_path
+        assert os.path.isfile(w.score_path), '保存的目标文件不存在'
+        with open(mid, 'rb') as fh:
+            assert fh.read() == before, '保存编辑结果时把 MIDI 覆盖了'
+        assert len(load_score(mid).notes) == n_midi, 'MIDI 读不回来了'
+
+        # 4) 编排预览模式保存：同样落到 .json，MIDI 原封不动
+        w.set_mode('preview')
+        pump(150)
+        w.save_arrangement()
+        pump(300)
+        with open(mid, 'rb') as fh:
+            assert fh.read() == before, '保存编排时把 MIDI 覆盖了'
+        assert len(load_score(mid).notes) == n_midi, 'MIDI 读不回来了'
+
+        # 5) 历史坏文件（.mid 里装着 JSON）靠内容嗅探也能打开
+        broken = os.path.join(tmp, 'broken.mid')
+        shutil.copy2(written, broken)
+        assert len(load_score(broken).notes) > 0, '内容嗅探没救回被写坏的文件'
+        w.deleteLater()
+    finally:
+        shutil.rmtree(tmp, ignore_errors=True)
+
+
+case('保存不许把 JSON 写进 .mid（内容嗅探 + 覆盖开关）')(json_over_midi_case)
+
+
+
+def _pick_btn(box, needle):
+    """按按钮文字取按钮：QMessageBox.buttons() 的顺序由 Qt 排版决定，
+    不能按下标猜（第一次跑就栽在这上面）。"""
+    for b in box.buttons():
+        if needle in b.text():
+            return b
+    raise AssertionError('确认框里找不到「%s」按钮：%r'
+                         % (needle, [b.text() for b in box.buttons()]))
+
+
+def cut_time_confirm_case():
+    """剪掉时间会把剪口里的音符一起删掉（含跨越剪口的长音）→ 必须先确认。
+
+    回归背景：用户选的两个点里只要有一个落在长音上，整个长音就没了，
+    后面的音符还整体前移 —— 他却以为自己在「删一段空白」。
+    """
+    import shutil
+    import tempfile
+
+    from PySide6.QtWidgets import QMessageBox
+
+    from gtiharmonica.edit import EditDoc
+    from gtiharmonica.gui.editor import ScoreEditor, LONG_NOTE_SEC
+    from gtiharmonica.score import Note
+
+    doc = EditDoc(notes=[Note(pitch=60, start=0.0, duration=0.5),
+                         Note(pitch=62, start=1.0, duration=3.0),
+                         Note(pitch=64, start=5.0, duration=0.5),
+                         Note(pitch=65, start=6.0, duration=0.5)],
+                  title='cut')
+    cv = ScoreEditor()
+    cv.set_doc(doc)
+    assert LONG_NOTE_SEC < 3.0, '长音阈值不该比测试用的 3 秒长音还大'
+
+    # 1) 预览：谁被删、谁被移动，必须和 cut_time 的实际行为一致
+    drop, moved = cv._cut_preview(0.8, 2.0)
+    assert [n.pitch for n in drop] == [62], [n.pitch for n in drop]
+    assert [n.pitch for n in moved] == [64, 65], [n.pitch for n in moved]
+    pure = cv._cut_preview(4.0, 4.5)                 # 纯空白：不该有牺牲者
+    assert [n.pitch for n in pure[0]] == [], pure[0]
+    assert [n.pitch for n in pure[1]] == [64, 65], pure[1]
+
+    seen = []
+    saved_exec = QMessageBox.exec
+    saved_clicked = QMessageBox.clickedButton
+    try:
+        # 2) 纯空白：不弹确认，直接剪
+        QMessageBox.exec = lambda self: seen.append(self) and 0
+        cv._cut_time_range(4.0, 4.5, confirm=True)
+        assert not seen, '纯空白的剪掉不该弹确认框'
+
+        # 3) 剪口里有长音：确认框要点名长音，选「取消」不动谱子
+        doc.undo()
+        seen.clear()
+        QMessageBox.clickedButton = lambda self: _pick_btn(self, '取消')
+        before = [(n.pitch, n.start) for n in doc.notes]
+        cv._cut_time_range(0.8, 2.0, confirm=True)
+        assert seen, '剪口里有音符时必须确认'
+        text = seen[-1].text() + seen[-1].informativeText()
+        assert '跨越剪口' in text and '长音' in text, '确认框没说清代价：%r' % text
+        assert [(n.pitch, n.start) for n in doc.notes] == before, '取消后谱子被改了'
+
+        # 4) 选「继续剪掉」→ 长音删除、后面音符前移 1.2 秒
+        seen.clear()
+        QMessageBox.clickedButton = lambda self: _pick_btn(self, '继续')
+        cv._cut_time_range(0.8, 2.0, confirm=True)
+        assert [n.pitch for n in doc.notes] == [60, 64, 65],             [n.pitch for n in doc.notes]
+        assert abs(doc.notes[1].start - 3.8) < 1e-6, doc.notes[1].start
+        doc.undo()
+        assert len(doc.notes) == 4, '撤销没恢复长音'
+
+        # 5) confirm=False（内部/批处理路径）不弹窗也照剪
+        seen.clear()
+        cv._cut_time_range(0.8, 2.0, confirm=False)
+        assert not seen and len(doc.notes) == 3
+    finally:
+        QMessageBox.exec = saved_exec
+        QMessageBox.clickedButton = saved_clicked
+        cv.set_doc(None)
+        cv.deleteLater()
+
+
+case('剪掉时间前确认（长音不被悄悄删掉）')(cut_time_confirm_case)
+
+print()
+if failures:
+    print('=== %d 项失败 ===' % len(failures))
+    for name, tb in failures:
+        print('---- %s ----' % name)
+        print(tb)
+    sys.exit(1)
+print('=== 全部通过（%s 主题，%d 首曲子，7 个对话框，悬浮窗全流程）==='
+      % (THEME, len(songs)))

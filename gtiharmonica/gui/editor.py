@@ -73,6 +73,10 @@ class _UndoKeyFilter(QObject):
 #: 整段删除的预览色用暖红：这是唯一会「成片杀音符」的操作，
 #: 视觉上必须和绿色的选择/框选拉开距离，避免手滑时看起来像普通选择。
 
+#: 多长的音算「长音」。剪掉时间时，跨越剪口又超过这个时长的音符要单独
+#: 点名警告 —— 它们被删掉最不容易被察觉（余音本来就长），删完整句都空。
+LONG_NOTE_SEC = 1.0
+
 
 class ScoreEditor(PianoRoll):
     """可编辑卷帘。"""
@@ -974,8 +978,9 @@ class ScoreEditor(PianoRoll):
         self.setFocus(Qt.MouseFocusReason)
         if action == 'cut':
             self.statusMessage.emit(
-                '剪掉时间：在画布上点第 1 个位置（任何地方都可以，Esc 取消）\n'
-                '剪掉后这段时间被移除，后面的音符会前移补位')
+                '剪掉时间：在画布上点第 1 个位置（Esc 取消）\n'
+                '剪口里的音符（含跨在剪口上的长音）会一起删掉 —— '
+                '选第二点前先看清，动手时还会再确认一次')
         else:
             self.statusMessage.emit(
                 '整段删除：在画布上点第 1 个位置（任何地方都可以，Esc 取消）\n'
@@ -1019,16 +1024,79 @@ class ScoreEditor(PianoRoll):
         self._after_edit('整段删除了 %d 个音符（%.2fs ~ %.2fs）—— Ctrl+Z 可撤销'
                          % (n, a, b))
 
-    def _cut_time_range(self, a: float, b: float) -> None:
-        """剪掉 [a, b] 这段时间：删音符 + 后面的音符前移补位。"""
+    def _cut_time_range(self, a: float, b: float, confirm: bool = True) -> None:
+        """剪掉 [a, b] 这段时间：段内音符删除 + 后面的音符前移补位。
+
+        剪之前要确认，因为「剪掉一段时间」听起来像只动时间轴，实际会连带
+        删掉这段时间里的音符 —— 尤其是**跨越剪口的长音**：用户选的两个点
+        只要有一个落在长音里，整个长音就没了（还会把后面的音符整体前移，
+        听感上等于整段错位）。这正是用户报过的「尾音很长…删空白后还是
+        出问题」的来源，所以这里必须把代价说清楚再动手。
+        """
         a, b = min(a, b), max(a, b)
-        n = self._doc.cut_time(a, b)
-        if n <= 0 and abs(b - a) < 1e-9:
+        if abs(b - a) < 1e-9:
             self.statusMessage.emit('%.2fs ~ %.2fs 之间没有内容' % (a, b))
             self.update()
             return
-        self._after_edit('剪掉了 %.2f 秒（删除 %d 个音符），后面的音符已前移'
-                         ' —— Ctrl+Z 可撤销' % (b - a, n))
+        drop, moved = self._cut_preview(a, b)
+        if confirm and drop and not self._confirm_cut(a, b, drop, moved):
+            self.statusMessage.emit('已取消剪掉时间')
+            self.update()
+            return
+        n = self._doc.cut_time(a, b)
+        note = '剪掉了 %.2f 秒（删除 %d 个音符），后面的音符已前移' % (b - a, n)
+        long_ones = [x for x in drop
+                     if x.duration >= LONG_NOTE_SEC
+                     and (x.start < a - 1e-9 or x.end > b + 1e-9)]
+        if long_ones:
+            note += '；连 %.2f 秒的长音一起删了' % max(x.duration
+                                                    for x in long_ones)
+        self._after_edit(note + ' —— Ctrl+Z 可撤销')
+
+    def _cut_preview(self, a: float, b: float) -> Tuple[List, List]:
+        """剪 [a, b] 会删掉哪些音符、移动哪些音符。
+
+        判定与 EditDoc.cut_time 保持一致（与 [a, b] 相交即删、起点在 b
+        之后前移），所以确认框里数出来的就是真正会发生的事。
+        """
+        doc = self._doc
+        if doc is None:
+            return [], []
+        drop, moved = [], []
+        for n in doc.notes:
+            if n.start < b and n.end > a:
+                drop.append(n)
+            elif n.start >= b - 1e-9:
+                moved.append(n)
+        return drop, moved
+
+    def _confirm_cut(self, a: float, b: float, drop: List,
+                     moved: List) -> bool:
+        """把「剪掉时间」的代价摆出来，由用户决定继续还是取消。"""
+        from PySide6.QtWidgets import QMessageBox
+        spanning = [n for n in drop if n.start < a - 1e-9 or n.end > b + 1e-9]
+        longest = max(drop, key=lambda n: n.duration)
+        lines = ['剪掉 %.2f 秒（%.2fs ~ %.2fs）。' % (b - a, a, b),
+                 '这段时间里有 %d 个音符会被一起删掉%s，'
+                 '后面的 %d 个音符前移补位。'
+                 % (len(drop),
+                    '（其中 %d 个跨越剪口）' % len(spanning) if spanning else '',
+                    len(moved))]
+        if longest.duration >= LONG_NOTE_SEC:
+            lines.append('最长的那个有 %.2f 秒（%s）—— 长音的余音很长，'
+                         '删掉后这一句听起来会空一截。'
+                         % (longest.duration, note_name(longest.pitch)))
+        lines.append('想只删空白、一个音符都不碰：先取消，把两个点都点在'
+                     '完全没有音符的地方。')
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Warning)
+        box.setWindowTitle('剪掉时间')
+        box.setText(lines[0])
+        box.setInformativeText('\n'.join(lines[1:]))
+        btn_go = box.addButton('继续剪掉', QMessageBox.DestructiveRole)
+        box.addButton('取消', QMessageBox.RejectRole)
+        box.exec()
+        return box.clickedButton() is btn_go
 
     def _paint_range(self, p: QPainter, plot: QRectF) -> None:
         """时间轴点选的范围预览：已定起点后，从起点画到鼠标（或终点）。
@@ -1199,6 +1267,7 @@ class EditorToolbar(QFrame):
             '剪掉时间 —— 剪掉一段时间，后面的音符前移补位（时间轴缩短）：\n'
             '点这里 → 在画布上点第 1 个位置 → 再点第 2 个（任意位置均可）\n'
             '和「整段删除」的区别：那个只删音符、留一片空白；这个把空白合拢\n'
+            '剪口里的音符会一起删掉，跨在剪口上的长音也是 —— 动手前会先确认\n'
             '右键 / Esc 取消 · Ctrl+Z 可撤销')
 
         # 插入类操作都挂在播放头上：看着卷帘走到想插入的位置，点按钮即可
